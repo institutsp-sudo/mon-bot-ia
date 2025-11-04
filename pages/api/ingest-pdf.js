@@ -1,48 +1,84 @@
-// /api/ingest-pdf.js (TEST E : UNIQUMENT VERIFICATION GEMINI)
+// /api/ingest-pdf.js (CODE FINAL D'INGESTION)
 
-import { GoogleGenAI } from '@google/genai'; 
-import { Pinecone } from '@pinecone-database/pinecone'; 
-import axios from 'axios'; // Garder les imports au cas où la dépendance est la cause
+import { GoogleGenAI } from '@google/genai';
+import { Pinecone } from '@pinecone-database/pinecone';
+import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
+import pdf from 'pdf-parse';
+import axios from 'axios';
 
-// --- Initialisation des services (Le Point de Test) ---
+// --- Configuration et Variables d'Environnement (Lues par Vercel) ---
 const INDEX_NAME = process.env.PINECONE_INDEX; 
 const PDF_URL = 'https://saintpierre91.org/wp-content/uploads/2024/10/reglement-interieur.pdf'; 
+const EMBEDDING_MODEL = 'text-embedding-004'; 
+const BATCH_SIZE = 100; 
 
-// On décommente UNIQUEMENT l'initialisation de Gemini. 
-// Le reste est conservé pour la structure, mais non exécuté.
-try {
-    const ai = new GoogleGenAI({}); // Utilise GEMINI_API_KEY de Vercel
-    
-    // On pourrait même essayer de faire une requête simple pour forcer l'auth
-    // const models = await ai.models.list(); 
-    
-    console.log("✅ Client Gemini initialisé."); 
-} catch (e) {
-    console.error("❌ ERREUR FATALE AUTHENTIFICATION GEMINI : ", e.message);
-    // Si cela échoue, on force une Erreur 500 immédiate avec un message explicite
-    throw new Error('Échec de la connexion Gemini. Vérifiez GEMINI_API_KEY : ' + e.message); 
+// Initialisation des services
+const ai = new GoogleGenAI({}); 
+const pinecone = new Pinecone({}); 
+
+// --- Fonctions d'Ingestion ---
+
+async function getPdfTextFromUrl(url) {
+    console.log(`[INGEST] Téléchargement et lecture de ${url}...`);
+    const response = await axios.get(url, { responseType: 'arraybuffer' });
+    const dataBuffer = Buffer.from(response.data);
+    const data = await pdf(dataBuffer);
+    return data.text;
 }
 
-
-// --- Fonctions Vides ---
 async function ingestPdf() {
-    // Cette fonction ne s'exécutera pas dans le test
-    return;
+    console.log("[INGEST] Processus d'ingestion démarré.");
+    
+    const fullText = await getPdfTextFromUrl(PDF_URL);
+
+    const splitter = new RecursiveCharacterTextSplitter({
+        chunkSize: 1000,
+        chunkOverlap: 200, 
+    });
+    const docs = await splitter.createDocuments([fullText]);
+    console.log(`[INGEST] PDF divisé en ${docs.length} morceaux.`);
+    
+    const index = pinecone.Index(INDEX_NAME);
+    
+    console.log('[INGEST] Création des embeddings Gemini et insertion dans Pinecone en cours...');
+
+    for (let i = 0; i < docs.length; i += BATCH_SIZE) {
+        const batch = docs.slice(i, i + BATCH_SIZE);
+        const batchText = batch.map(doc => doc.pageContent);
+
+        const embeddingResponse = await ai.models.batchEmbedContents({
+            model: EMBEDDING_MODEL,
+            requests: batchText.map(text => ({ content: text })),
+        });
+        const vectors = embeddingResponse.embeddings.map(e => e.values);
+
+        const upsertData = vectors.map((vector, idx) => ({
+            id: `pdf-chunk-${i + idx}-${Date.now()}`,
+            values: vector,
+            metadata: { text: batch[idx].pageContent, source: PDF_URL },
+        }));
+
+        await index.upsert({ vectors: upsertData });
+        console.log(`[INGEST] Lot ${i / BATCH_SIZE + 1} / ${Math.ceil(docs.length / BATCH_SIZE)} inséré.`);
+    }
+
+    console.log('✅ [INGEST] Ingestion du PDF terminée avec succès !');
 }
 
 
 // --- Le Handler Next.js / Vercel ---
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
-        res.status(405).json({ message: 'Méthode non autorisée.' });
+        res.status(405).json({ message: 'Méthode non autorisée. Utilisez POST.' });
         return;
     }
-    
+
     try {
-        // Si on arrive ici, l'initialisation de Gemini ci-dessus a réussi.
-        res.status(200).json({ success: true, message: 'TEST E REUSSI: Clé Gemini acceptée. Le problème vient de Pinecone.' });
+        await ingestPdf(); // Exécute le processus d'ingestion
+        res.status(200).json({ success: true, message: 'Ingestion du PDF terminée avec succès. Votre KB est prête.' });
     } catch (error) {
-        // Réponse d'erreur si le 'throw new Error' ci-dessus est exécuté
-        res.status(500).json({ success: false, message: 'Erreur 500 (Initialisation Gemini échouée). Vérifiez les logs Vercel.' });
+        // En cas d'erreur ici, cela provient d'une erreur d'API (Pinecone, Gemini, Axios)
+        console.error('❌ Erreur Critique lors de l\'ingestion (Vercel Logs):', error);
+        res.status(500).json({ success: false, message: 'Erreur lors de l\'ingestion. Problème de clé/connexion Pinecone ou Gemini.' });
     }
 }
