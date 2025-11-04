@@ -1,46 +1,50 @@
-// /api/ingest-pdf.js (TEST F : UNIQUEMENT CONNEXION PINE CONE)
+// /api/ingest-pdf.js (TEST G : FORCER L'HÔTE PINE CONE)
 
-import { GoogleGenAI } from '@google/genai';
 import { Pinecone } from '@pinecone-database/pinecone';
 
+// REMPLACER PAR VOTRE VRAI HOST.
+const PINECONE_HOST = 'https://mon-bot-kb-jgjvrqe.svc.aped-4627-b74a.pinecone.io';
+const INDEX_NAME = 'mon-bot-kb'; // Remplacer par le nom de votre index
+
 // --- Initialisation des services ---
-const INDEX_NAME = process.env.PINECONE_INDEX; 
+const pinecone = new Pinecone({}); // Utilisez la variable pour l'API Key
 
-// Initialisation simple de Gemini et Pinecone.
-const ai = new GoogleGenAI({}); 
-const pinecone = new Pinecone({}); 
-
-// --- Fonction Vides pour ce test ---
-async function getPdfTextFromUrl(url) { return "texte test"; }
 async function ingestPdf() {
-    console.log("[TEST F] Démarrage du test Pinecone.");
+    console.log("[TEST G] Démarrage du test Pinecone par HOST.");
     
-    // Tentative d'accès à l'index pour vérifier la clé Pinecone
     try {
-        const index = pinecone.Index(INDEX_NAME);
-        // On essaie de récupérer les stats pour forcer une communication réseau rapide
+        // Nouvelle méthode d'initialisation forçant l'utilisation de l'URL d'hôte
+        const index = new Index(pinecone, INDEX_NAME, PINECONE_HOST); 
+
+        // Tentative de récupérer les stats pour forcer une communication réseau
         await index.describeIndexStats(); 
-        console.log("✅ TEST F (Pinecone) : Statut de l'index récupéré.");
+        console.log("✅ TEST G (Pinecone) : Statut de l'index récupéré par Host.");
+
     } catch (e) {
-        console.error("❌ ERREUR FATALE PINE CONE (TEST F) :", e.message);
-        // On relance l'erreur pour la capturer et éviter le silence.
-        throw new Error('Échec de la connexion/clé Pinecone: ' + e.message);
+        console.error("❌ ERREUR FATALE PINE CONE (TEST G) :", e.message);
+        throw new Error('Échec de la connexion/clé Pinecone (Test G): ' + e.message);
     }
 }
 
+// NOTE: Vous devrez peut-être ajouter une classe Index pour que cela fonctionne
+// Si vous ne voulez pas modifier votre structure, nous allons faire un test plus simple.
+// 
+// Méthode de Test G Simplifiée : Tenter la connexion avec une API Key vide (qui devrait échouer immédiatement, non silencieusement)
 
-// --- Le Handler Next.js / Vercel ---
-export default async function handler(req, res) {
-    if (req.method !== 'POST') {
-        res.status(405).json({ message: 'Méthode non autorisée.' });
-        return;
-    }
-
+async function ingestPdf() {
+    console.log("[TEST G - Simplifié] Test de la réjection de clé.");
+    
+    // Test forçant la réjection immédiate si la clé est la seule source du problème
     try {
-        await ingestPdf(); 
-        res.status(200).json({ success: true, message: 'TEST F REUSSI: Clés et connexion Pinecone OK.' });
-    } catch (error) {
-        // Cette erreur est catchée si l'appel describeIndexStats a planté
-        res.status(500).json({ success: false, message: 'Erreur 500 (Problème de clé/connexion Pinecone).' });
+        const pineconeTest = new Pinecone({ apiKey: 'FAUSSE_CLE_TEST_POUR_ERREUR' });
+        const index = pineconeTest.Index(INDEX_NAME);
+        await index.describeIndexStats(); 
+        
+    } catch (e) {
+        // Ce bloc devrait être atteint IMMÉDIATEMENT si c'est une erreur d'AUTH.
+        // Si le silence persiste, l'erreur n'est PAS l'authentification.
+        console.log("Le silence persiste. L'erreur est sur la dépendance ou le réseau.");
     }
+    throw new Error("Arrêt du test.");
 }
+// Le reste du handler reste le même.
