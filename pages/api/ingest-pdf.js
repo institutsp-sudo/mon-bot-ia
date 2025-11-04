@@ -15,10 +15,10 @@ const BATCH_SIZE = 100;
 
 // Initialisation des services
 const ai = new GoogleGenAI({}); 
-// const pinecone = new Pinecone({}); // <-- Ligne actuelle à remplacer
+const pinecone = new Pinecone({}); // <-- Ligne actuelle à remplacer
 
 // NOUVELLE LIGNE : Forcer l'utilisation d'une fausse clé API pour générer une erreur immédiate
-const pinecone = new Pinecone({ apiKey: "FAUSSE_CLE_TEST_PINECONE_VRAIMENT_INVALIDE_007" });
+//const pinecone = new Pinecone({ apiKey: "FAUSSE_CLE_TEST_PINECONE_VRAIMENT_INVALIDE_007" });
 
 
 
